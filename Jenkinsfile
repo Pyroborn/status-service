@@ -20,7 +20,9 @@ pipeline {
         }
 
         stage('Testing') {
+            steps{
             sh 'npm test'
+            }
         }
 
     post {
