@@ -1,0 +1,30 @@
+{
+  "name": "status-service",
+  "version": "1.0.0",
+  "description": "Status service for ticket system",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "start:local": "cp .env.local .env && npm start",
+    "dev:local": "cp .env.local .env && npm run dev",
+    "start:k8s": "cp .env.kubernetes .env && npm start",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "amqplib": "^0.10.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.18.2",
+    "mongoose": "^8.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.3"
+  }
+}
