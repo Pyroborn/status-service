@@ -24,7 +24,7 @@ pipeline {
             sh 'npm test'
             }
         }
-
+    }
     post {
     always {
         cleanWs()
@@ -36,5 +36,4 @@ pipeline {
         echo 'Pipeline failed!'
     }
     }
-}
 }
