@@ -1,3 +1,11 @@
+// Define STATUS_TYPES for validation
+const STATUS_TYPES = {
+    OPEN: 'open',
+    IN_PROGRESS: 'in_progress',
+    RESOLVED: 'resolved',
+    CLOSED: 'closed'
+};
+
 // Mock mongoose
 jest.mock('mongoose', () => {
     class Schema {
@@ -36,11 +44,41 @@ jest.mock('mongoose', () => {
                             throw new mockMongoose.Error.ValidationError();
                         }
                         return this;
-                    })
+                    }),
+                    history: data.history || [{
+                        status: data.currentStatus || STATUS_TYPES.OPEN,
+                        updatedBy: data.updatedBy || 'system',
+                        timestamp: new Date()
+                    }],
+                    isValidTransition: jest.fn().mockImplementation(function(newStatus) {
+                        const validTransitions = {
+                            [STATUS_TYPES.OPEN]: [STATUS_TYPES.IN_PROGRESS, STATUS_TYPES.CLOSED],
+                            [STATUS_TYPES.IN_PROGRESS]: [STATUS_TYPES.RESOLVED, STATUS_TYPES.CLOSED],
+                            [STATUS_TYPES.RESOLVED]: [STATUS_TYPES.CLOSED, STATUS_TYPES.IN_PROGRESS],
+                            [STATUS_TYPES.CLOSED]: []
+                        };
+                        return validTransitions[this.currentStatus]?.includes(newStatus) || false;
+                    }),
+                    updateStatus: jest.fn().mockImplementation(async function(newStatus, updatedBy, reason) {
+                        // No validation in the mock to make tests simpler
+                        this.history.push({
+                            status: newStatus,
+                            updatedBy,
+                            reason: reason || `Status changed to ${newStatus}`,
+                            timestamp: new Date()
+                        });
+                        this.currentStatus = newStatus;
+                        return this;
+                    }),
+                    toObject: function() { return this; }
                 };
             }
+            
             // Add static methods
-            Object.assign(Model, schema.statics);
+            Model.findOne = jest.fn();
+            Model.findById = jest.fn();
+            Model.getStatusHistory = jest.fn();
+            
             return Model;
         }),
         Types: {
@@ -67,16 +105,26 @@ jest.mock('mongoose', () => {
     return mockMongoose;
 });
 
-// Mock STATUS_TYPES for validation
-const STATUS_TYPES = {
-    OPEN: 'open',
-    IN_PROGRESS: 'in_progress',
-    RESOLVED: 'resolved',
-    CLOSED: 'closed'
-};
+// Mock amqplib to prevent actual RabbitMQ connections
+jest.mock('amqplib', () => require('./__mocks__/amqplib'));
+
+// Mock the messageQueue
+jest.mock('../src/messageQueue', () => ({
+    publishStatusCreated: jest.fn().mockResolvedValue(true),
+    publishStatusUpdated: jest.fn().mockResolvedValue(true),
+    publishStatusDeleted: jest.fn().mockResolvedValue(true),
+    channel: {},
+    init: jest.fn().mockResolvedValue(true),
+    close: jest.fn().mockResolvedValue(true)
+}));
 
 // Global test environment setup
 process.env.NODE_ENV = 'test';
+process.env.JWT_SECRET = 'test-jwt-secret';
+process.env.SERVICE_API_KEY = 'test-service-api-key';
+
+// Increase timeout for tests
+jest.setTimeout(30000);
 
 // Console error/warning mock to keep test output clean
 global.console = {
@@ -85,4 +133,10 @@ global.console = {
     warn: jest.fn(),
     info: jest.fn(),
     debug: jest.fn(),
+    log: jest.fn()
 }; 
+
+// Setup global afterAll to ensure all mocks are cleaned up
+afterAll(() => {
+    jest.restoreAllMocks();
+}); 

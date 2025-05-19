@@ -5,10 +5,21 @@ yarn-debug.log
 yarn-error.log
 package-lock.json
 
-# Environment and config
+# Environment variables and sensitive files
 .env
 .env.*
 *.local
+*credentials*
+*secret*
+*.key
+*.pem
+*.cert
+*.p12
+*password*
+*token*
+*auth*
+*login*.json
+*login*.txt
 
 # Version control
 .git
@@ -26,6 +37,8 @@ tests/
 coverage/
 .nyc_output/
 src/tests/
+junit.xml
+reports/
 
 # IDE and editor files
 .idea/

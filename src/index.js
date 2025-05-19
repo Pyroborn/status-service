@@ -4,38 +4,134 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const { TicketStatus } = require('./models/status');
 const messageQueue = require('./messageQueue');
+const authMiddleware = require('./middleware/auth');
+const amqp = require('amqplib');
 
 const app = express();
 
-// Middleware
+// Check if running in local mode
+const isLocal = process.env.IS_LOCAL === 'true';
+console.log(`Running in ${isLocal ? 'LOCAL' : 'KUBERNETES'} mode`);
+
+// CORS configuration with environment-aware settings
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+    ? process.env.ALLOWED_ORIGINS.split(',') 
+    : ['http://localhost:3002', 'http://localhost:3000'];
+
 app.use(cors({
-  origin: ['http://localhost:3002', 'http://ticket-service:3002'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Id']
+    origin: allowedOrigins,
+    methods: process.env.CORS_METHODS ? process.env.CORS_METHODS.split(',') : ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: process.env.CORS_HEADERS ? process.env.CORS_HEADERS.split(',') : ['Content-Type', 'Authorization'],
+    exposedHeaders: ['Content-Disposition'],
+    credentials: true
 }));
+
+// Body parser middleware
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Request logging middleware
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} [${req.method}] ${req.originalUrl}`);
-  if (req.body && Object.keys(req.body).length > 0) {
-    console.log('Request body:', req.body);
-  }
-  
-  // Capture the original send method
-  const originalSend = res.send;
-  
-  // Override the send method
-  res.send = function(body) {
-    console.log(`Response for ${req.originalUrl}:`, 
-      body?.length > 100 
-        ? `${body.substring(0, 100)}... (truncated)` 
-        : body);
-    // Call the original send method
-    originalSend.call(this, body);
-  };
-  
-  next();
+    // Only log the method and path for API requests
+    console.log(`${req.method} ${req.path}`);
+    
+    // Skip detailed logging of request/response bodies in production
+    if (process.env.NODE_ENV !== 'development') {
+        return next();
+    }
+    
+    if (req.body && Object.keys(req.body).length > 0) {
+        console.log('Request body:', req.body);
+    }
+    
+    // Capture the original send method
+    const originalSend = res.send;
+    
+    // Override the send method
+    res.send = function(body) {
+        console.log(`Response for ${req.path}:`, 
+            body?.length > 100 
+                ? `${body.substring(0, 100)}... (truncated)` 
+                : body);
+        // Call the original send method
+        originalSend.call(this, body);
+    };
+    
+    next();
+});
+
+// Auth verification endpoint for service-to-service communication
+app.get('/auth/verify', (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader) {
+            return res.status(401).json({ 
+                error: 'No authorization header provided',
+                code: 'NO_AUTH_HEADER'
+            });
+        }
+
+        // Service API key authentication
+        if (authHeader.startsWith('ApiKey ')) {
+            const apiKey = authHeader.split(' ')[1];
+            if (apiKey === (process.env.SERVICE_API_KEY || 'microservice-internal-key')) {
+                return res.status(200).json({ 
+                    status: 'valid',
+                    type: 'service',
+                    role: 'service'
+                });
+            } else {
+                return res.status(401).json({
+                    error: 'Invalid API key',
+                    code: 'INVALID_API_KEY'
+                });
+            }
+        }
+
+        // JWT verification
+        if (authHeader.startsWith('Bearer ')) {
+            const token = authHeader.split(' ')[1];
+            if (!token) {
+                return res.status(401).json({ 
+                    error: 'No token provided',
+                    code: 'NO_TOKEN'
+                });
+            }
+
+            const jwt = require('jsonwebtoken');
+            const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+            
+            try {
+                const decoded = jwt.verify(token, JWT_SECRET);
+                return res.status(200).json({
+                    status: 'valid',
+                    user: {
+                        id: decoded.id,
+                        email: decoded.email,
+                        name: decoded.name || decoded.email,
+                        role: decoded.role || 'user'
+                    }
+                });
+            } catch (jwtError) {
+                console.error('JWT verification error:', jwtError);
+                return res.status(401).json({ 
+                    error: 'Invalid or expired token',
+                    code: 'INVALID_TOKEN'
+                });
+            }
+        }
+
+        return res.status(401).json({ 
+            error: 'Invalid authorization format',
+            code: 'INVALID_AUTH_FORMAT'
+        });
+    } catch (error) {
+        console.error('Auth verification error:', error);
+        res.status(500).json({ 
+            error: 'Authentication verification error',
+            code: 'AUTH_ERROR'
+        });
+    }
 });
 
 // Health check endpoint for Kubernetes
@@ -121,38 +217,44 @@ app.get('/health', async (req, res) => {
     }
 });
 
-// Status Routes
-app.get('/status/:ticketId', async (req, res) => {
+// Status Routes - Protected by Auth Middleware
+app.get('/status/:ticketId', authMiddleware, async (req, res) => {
     try {
         const status = await TicketStatus.findOne({ ticketId: req.params.ticketId });
         if (!status) {
-            return res.status(404).json({ message: 'Status not found for this ticket' });
+            return res.status(404).json({ 
+                message: 'Status not found for this ticket',
+                ticketId: req.params.ticketId
+            });
         }
         res.json(status);
     } catch (error) {
+        console.error(`Error getting status: ${error.message}`);
         res.status(500).json({ message: error.message });
     }
 });
 
-app.get('/status/:ticketId/history', async (req, res) => {
+app.get('/status/:ticketId/history', authMiddleware, async (req, res) => {
     try {
         const { ticketId } = req.params;
-        const { startDate, endDate } = req.query;
+        const { startDate, endDate, limit } = req.query;
         
-        console.log(`Getting status history for ticket: ${ticketId}`);
+        const parsedLimit = limit ? parseInt(limit, 10) : null;
         
         // Try to find status with the provided ID
-        const history = await TicketStatus.getStatusHistory(ticketId, { startDate, endDate });
+        const history = await TicketStatus.getStatusHistory(ticketId, { 
+            startDate, 
+            endDate,
+            limit: parsedLimit
+        });
         
         if (!history) {
-            console.log(`No history found for ticket: ${ticketId}`);
             return res.status(404).json({ 
                 message: 'No history found for this ticket',
                 ticketId
             });
         }
         
-        console.log(`Found ${history.length} history entries for ticket: ${ticketId}`);
         res.json(history);
     } catch (error) {
         console.error(`Error getting status history: ${error.message}`);
@@ -160,24 +262,20 @@ app.get('/status/:ticketId/history', async (req, res) => {
     }
 });
 
-app.post('/status/:ticketId/update', async (req, res) => {
+// Update status for a ticket
+app.post('/status/:ticketId/update', authMiddleware, async (req, res) => {
     try {
         const { ticketId } = req.params;
         const { status, updatedBy, reason } = req.body;
-        
-        console.log(`Updating status for ticket ${ticketId} to ${status} by ${updatedBy}`);
-        
+
         if (!status || !updatedBy) {
-            return res.status(400).json({ 
-                message: 'Missing required fields: status and updatedBy are required',
-                received: { status, updatedBy }
-            });
+            return res.status(400).json({ message: 'Missing required fields' });
         }
 
         let ticketStatus = await TicketStatus.findOne({ ticketId });
-        
+        const previousStatus = ticketStatus?.currentStatus;
+
         if (!ticketStatus) {
-            console.log(`Creating new status record for ticket ${ticketId}`);
             ticketStatus = new TicketStatus({
                 ticketId,
                 currentStatus: status,
@@ -188,27 +286,172 @@ app.post('/status/:ticketId/update', async (req, res) => {
                 }]
             });
             await ticketStatus.save();
-            console.log(`Created initial status for ticket ${ticketId}`);
         } else {
-            try {
-                console.log(`Updating existing status for ticket ${ticketId} from ${ticketStatus.currentStatus} to ${status}`);
-                await ticketStatus.updateStatus(status, updatedBy, reason);
-                console.log(`Successfully updated status for ticket ${ticketId}`);
-            } catch (error) {
-                console.error(`Error updating status: ${error.message}`);
-                if (error.message.includes('Invalid status transition')) {
-                    return res.status(400).json({ message: error.message });
+            // Check if this is a potential duplicate by comparing to the most recent history entry
+            let isDuplicate = false;
+            if (ticketStatus.history && ticketStatus.history.length > 0) {
+                const lastEntry = ticketStatus.history[ticketStatus.history.length - 1];
+                const now = new Date();
+                const lastEntryTime = new Date(lastEntry.timestamp);
+                const timeDiffInSeconds = Math.abs((now - lastEntryTime) / 1000);
+                
+                // If the entry is very recent (within 5 seconds) and has the same status and similar reason
+                if (
+                    lastEntry.status === status && 
+                    timeDiffInSeconds < 5 &&
+                    lastEntry.updatedBy === updatedBy &&
+                    (lastEntry.reason === reason || 
+                     (lastEntry.reason && reason && 
+                      (lastEntry.reason.includes(reason) || 
+                       reason.includes(lastEntry.reason))))
+                ) {
+                    isDuplicate = true;
                 }
-                throw error;
+            }
+            
+            // If it's not a duplicate, proceed with the update
+            if (!isDuplicate) {
+                // Check if the status is actually changing
+                if (ticketStatus.currentStatus === status) {
+                    // Just add an entry to history without triggering status validation
+                    await ticketStatus.addHistoryEntry(
+                        updatedBy,
+                        reason || `Status update to ${status} (no change)`
+                    );
+                } else {
+                    // Status is changing, use updateStatus method
+                    await ticketStatus.updateStatus(status, updatedBy, reason);
+                }
             }
         }
 
+        // Determine if we should prevent message looping
+        // If it's a duplicate or if the request indicates it came from another service,
+        // pass preventLoop=true to avoid sending a message back
+        const preventLoop = req.body.fromMessageQueue === true || (req.headers && req.headers['x-from-service'] === 'true');
+
+        // Publish status updated event via RabbitMQ
+        await messageQueue.publishStatusUpdated(
+            ticketId,
+            status,
+            updatedBy,
+            reason || `Status changed from ${previousStatus} to ${status}`,
+            preventLoop
+        );
+
         res.json(ticketStatus);
     } catch (error) {
-        console.error(`Error in updateStatus: ${error.message}`);
-        res.status(400).json({ message: error.message });
+        console.error('Error updating status:', error.message);
+        if (error.message.includes('Invalid status transition')) {
+            return res.status(400).json({ message: error.message });
+        }
+        res.status(500).json({ message: error.message });
     }
 });
+
+// Get latest status for multiple tickets in a batch
+app.post('/status/batch', authMiddleware, async (req, res) => {
+    try {
+        const { ticketIds } = req.body;
+        
+        if (!ticketIds || !Array.isArray(ticketIds) || ticketIds.length === 0) {
+            return res.status(400).json({ message: 'Valid array of ticket IDs is required' });
+        }
+        
+        const statuses = await TicketStatus.getLatestStatusForTickets(ticketIds);
+        
+        // Create a map for quick lookup
+        const statusMap = {};
+        statuses.forEach(status => {
+            statusMap[status.ticketId] = {
+                currentStatus: status.currentStatus,
+                lastUpdated: status.lastUpdated
+            };
+        });
+        
+        // Return object with ticket IDs as keys for quick client-side lookup
+        res.json(statusMap);
+    } catch (error) {
+        console.error('Error getting batch status:', error.message);
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Get real-time status updates since a timestamp
+app.post('/status/updates', authMiddleware, async (req, res) => {
+    try {
+        const { since } = req.query;
+        const { ticketIds } = req.body;
+        
+        if (!ticketIds || !Array.isArray(ticketIds)) {
+            return res.status(400).json({ message: 'Valid array of ticket IDs is required' });
+        }
+        
+        const updates = await TicketStatus.getStatusUpdates(ticketIds, since);
+        
+        res.json({
+            timestamp: new Date().toISOString(),
+            updates: updates.map(update => ({
+                ticketId: update.ticketId,
+                currentStatus: update.currentStatus,
+                lastUpdated: update.lastUpdated,
+                latestHistory: update.history.slice(-1)[0] // Only include most recent history entry
+            }))
+        });
+    } catch (error) {
+        console.error('Error getting status updates:', error.message);
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// RabbitMQ connection
+let channel;
+const EXCHANGE_NAME = 'ticket_events';
+const STATUS_ROUTING_KEY = 'ticket.status.updated';
+
+async function setupRabbitMQ() {
+    try {
+        // Get RabbitMQ connection URL based on environment
+        const rabbitMqUrl = isLocal 
+            ? (process.env.LOCAL_RABBITMQ_URL || `amqp://${process.env.LOCAL_RABBITMQ_USER || 'guest'}:${process.env.LOCAL_RABBITMQ_PASS || 'guest'}@${process.env.LOCAL_RABBITMQ_HOST || 'localhost'}:${process.env.LOCAL_RABBITMQ_PORT || '5672'}`)
+            : (process.env.RABBITMQ_URL || 'amqp://rabbitmq-service:5672');
+            
+        console.log(`Connecting to RabbitMQ at: ${rabbitMqUrl.replace(/:[^:]*@/, ':***@')}`); // Hide password in logs
+        
+        const connection = await amqp.connect(rabbitMqUrl);
+        channel = await connection.createChannel();
+        
+        // Declare exchange
+        await channel.assertExchange(EXCHANGE_NAME, 'topic', { durable: true });
+        
+        console.log('Successfully connected to RabbitMQ');
+        
+        // Handle connection closure
+        connection.on('close', async () => {
+            console.log('RabbitMQ connection closed');
+            await retryConnection();
+        });
+    } catch (error) {
+        console.error('Error connecting to RabbitMQ:', error);
+        await retryConnection();
+    }
+}
+
+async function retryConnection(retries = 5, delay = 5000) {
+    for (let i = 1; i <= retries; i++) {
+        console.log(`Attempting to reconnect (${i}/${retries})...`);
+        try {
+            await setupRabbitMQ();
+            return;
+        } catch (error) {
+            if (i === retries) {
+                console.error('Failed to reconnect to RabbitMQ after multiple attempts');
+                process.exit(1);
+            }
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+}
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -244,10 +487,6 @@ const gracefulShutdown = async () => {
 
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
-
-// Check if running in local mode
-const isLocal = process.env.IS_LOCAL === 'true';
-console.log(`Running in ${isLocal ? 'LOCAL' : 'KUBERNETES'} mode`);
 
 // Connect to MongoDB
 const connectMongoDB = async () => {
@@ -307,13 +546,14 @@ const connectMongoDB = async () => {
     }
 };
 
-// Update the messageQueue.js module separately to handle local/k8s settings
-
 // Start the application
 const startApp = async () => {
     try {
         await connectMongoDB();
         await messageQueue.connect(isLocal);
+        
+        // Initialize RabbitMQ connection
+        await setupRabbitMQ();
 
         const PORT = process.env.PORT || 4001;
         server = app.listen(PORT, () => {

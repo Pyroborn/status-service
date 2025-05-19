@@ -103,4 +103,71 @@ Environment variables can be configured in:
 - `.env.local` - For local development
 - `.env.kubernetes` - For Kubernetes deployment
 
-See these files for all available configuration options. 
+See these files for all available configuration options.
+
+## Deployment Options
+
+### Local Development
+
+For local development, use the standard `.env` file which contains configurations for local connections.
+
+1. Run the service directly:
+```bash
+npm install
+npm start
+```
+
+### Docker Development Environment
+
+For a more production-like local environment, use Docker Compose:
+
+```bash
+cd kubernetes
+docker-compose up
+```
+
+This will start the status service along with MongoDB and RabbitMQ in containers.
+
+### Kubernetes Deployment
+
+The service is configured for Kubernetes deployment. To deploy to Minikube or a Kubernetes cluster:
+
+1. Build the Docker image:
+```bash
+docker build -t status-service:latest .
+```
+
+2. Apply the Kubernetes configurations:
+```bash
+kubectl apply -f kubernetes/deployment.yaml
+kubectl apply -f kubernetes/service.yaml
+```
+
+3. Create the required secrets:
+```bash
+kubectl create secret generic microservice-secrets \
+  --from-literal=jwt-secret=your_jwt_secret_here \
+  --from-literal=service-api-key=microservice-internal-key
+```
+
+## Testing
+
+Run the basic tests to ensure the service is functioning correctly:
+
+```bash
+npm test
+```
+
+To run with coverage reports:
+
+```bash
+npm run test:coverage
+```
+
+## Health Endpoints
+
+The service provides the following health check endpoints:
+
+- `/health/live` - Liveness probe endpoint
+- `/health/ready` - Readiness probe endpoint
+- `/health` - Detailed health status including MongoDB and RabbitMQ connections 

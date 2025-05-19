@@ -8,6 +8,7 @@ yarn-error.log*
 .env
 .env.local
 .env.*.local
+.env.*
 
 # Build output
 dist/
@@ -48,4 +49,17 @@ pids/
 
 # Test coverage
 coverage/
-.nyc_output/ 
+.nyc_output/
+
+# Credentials and sensitive data
+*credentials*
+*secret*
+*.key
+*.pem
+*.cert
+*.p12
+*password*
+*token*
+*auth*
+*login*.json
+*login*.txt 
