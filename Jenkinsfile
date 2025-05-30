@@ -41,11 +41,11 @@ pipeline {
                 sh 'mkdir -p reports'
                 
                 // Start MongoDB for testing (using a docker container)
-                sh '''
-                    docker run -d --name mongo-test -p 27017:27017 mongo:4.4
-                    # Wait for MongoDB to start
-                    sleep 5
-                '''
+                //sh '''
+                //    docker run -d --name mongo-test -p 27017:27017 mongo:4.4
+                //    # Wait for MongoDB to start
+                //     sleep 5
+                //'''
                 
                 // Run tests with coverage
                 sh 'npm run test:coverage -- --ci --reporters=default --reporters=jest-junit'
