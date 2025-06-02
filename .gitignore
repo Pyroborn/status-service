@@ -60,6 +60,5 @@ coverage/
 *.p12
 *password*
 *token*
-*auth*
 *login*.json
 *login*.txt 
