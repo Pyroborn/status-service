@@ -231,7 +231,6 @@ pipeline {
                     }
                 }
             }
-        }
     }
 
     stage('Checkov Infrastructure Security Scan') {
