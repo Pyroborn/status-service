@@ -66,7 +66,7 @@ docker-compose up status-service
    docker push your-registry/status-service:latest
    ```
 
-2. Update the image reference in `kubernetes/status-service/deployment.yaml` to match your registry.
+2. Update the image reference in `kubernetes/status-service/deployment.yaml` to registry.
 
 3. Apply the Kubernetes configurations:
    ```bash

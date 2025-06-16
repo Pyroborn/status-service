@@ -4,7 +4,7 @@
 
 describe('Status Service', () => {
   test('should be ready for deployment', () => {
-    // This test always passes to ensure we have test coverage
+    // This test always passes to ensure test coverage
     expect(true).toBe(true);
   });
 

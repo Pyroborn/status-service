@@ -9,11 +9,11 @@ const amqp = require('amqplib');
 
 const app = express();
 
-// Check if running in local mode
+// Environment mode detection
 const isLocal = process.env.IS_LOCAL === 'true';
 console.log(`Running in ${isLocal ? 'LOCAL' : 'KUBERNETES'} mode`);
 
-// CORS configuration with environment-aware settings
+// CORS configuration
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
     ? process.env.ALLOWED_ORIGINS.split(',') 
     : ['http://localhost:3002', 'http://localhost:3000'];
@@ -26,16 +26,16 @@ app.use(cors({
     credentials: true
 }));
 
-// Body parser middleware
+// Request parsing
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Request logging middleware
 app.use((req, res, next) => {
-    // Only log the method and path for API requests
+    // Log request path
     console.log(`${req.method} ${req.path}`);
     
-    // Skip detailed logging of request/response bodies in production
+    // Detailed logging only in development
     if (process.env.NODE_ENV !== 'development') {
         return next();
     }
@@ -44,16 +44,15 @@ app.use((req, res, next) => {
         console.log('Request body:', req.body);
     }
     
-    // Capture the original send method
+    // Capture original send method
     const originalSend = res.send;
     
-    // Override the send method
+    // Override send method for logging
     res.send = function(body) {
         console.log(`Response for ${req.path}:`, 
             body?.length > 100 
                 ? `${body.substring(0, 100)}... (truncated)` 
                 : body);
-        // Call the original send method
         originalSend.call(this, body);
     };
     
@@ -134,12 +133,12 @@ app.get('/auth/verify', (req, res) => {
     }
 });
 
-// Health check endpoint for Kubernetes
+// Liveness probe for Kubernetes
 app.get('/health/live', (req, res) => {
     res.status(200).json({ status: 'OK' });
 });
 
-// Readiness check endpoint for Kubernetes
+// Readiness probe for Kubernetes
 app.get('/health/ready', async (req, res) => {
     try {
         const isMongoConnected = mongoose.connection.readyState === 1;
@@ -166,7 +165,7 @@ app.get('/health/ready', async (req, res) => {
     }
 });
 
-// Enhanced health check endpoint 
+// Comprehensive health check endpoint 
 app.get('/health', async (req, res) => {
     try {
         // Check MongoDB connection
@@ -175,7 +174,7 @@ app.get('/health', async (req, res) => {
         // Check RabbitMQ connection
         const hasRabbitMQChannel = !!messageQueue.channel;
         
-        // Try to execute a basic query to verify DB is truly operational
+        // Verify database operational status
         let dbQuerySuccess = false;
         try {
             const count = await TicketStatus.countDocuments({}).exec();
@@ -202,7 +201,7 @@ app.get('/health', async (req, res) => {
             isLocal: process.env.IS_LOCAL === 'true'
         };
         
-        // Return appropriate status code based on health
+        // Return status code based on health
         if (isMongoConnected && dbQuerySuccess && hasRabbitMQChannel) {
             res.status(200).json(status);
         } else {

@@ -6,7 +6,7 @@ const STATUS_TYPES = {
     CLOSED: 'closed'
 };
 
-// Mock mongoose
+// Mock mongoose implementation
 jest.mock('mongoose', () => {
     class Schema {
         constructor() {
@@ -15,12 +15,12 @@ jest.mock('mongoose', () => {
             this.pre = jest.fn();
         }
 
-        // Add method to prototype
+        // Register instance method
         method(name, fn) {
             this.methods[name] = fn;
         }
 
-        // Add static to prototype
+        // Register static method
         static(name, fn) {
             this.statics[name] = fn;
         }
@@ -29,17 +29,17 @@ jest.mock('mongoose', () => {
     const mockMongoose = {
         Schema,
         model: jest.fn().mockImplementation((name, schema) => {
-            // Create constructor function that includes schema methods
+            // Create model constructor with schema methods
             function Model(data) {
                 return {
                     ...data,
                     ...schema.methods,
                     save: jest.fn().mockImplementation(async function() {
-                        // Validate required fields
+                        // Field validation
                         if (!this.ticketId || !this.currentStatus) {
                             throw new mockMongoose.Error.ValidationError();
                         }
-                        // Validate status value
+                        // Status value validation
                         if (!Object.values(STATUS_TYPES).includes(this.currentStatus)) {
                             throw new mockMongoose.Error.ValidationError();
                         }
@@ -60,7 +60,7 @@ jest.mock('mongoose', () => {
                         return validTransitions[this.currentStatus]?.includes(newStatus) || false;
                     }),
                     updateStatus: jest.fn().mockImplementation(async function(newStatus, updatedBy, reason) {
-                        // No validation in the mock to make tests simpler
+                        // Simplified for testing purposes
                         this.history.push({
                             status: newStatus,
                             updatedBy,
@@ -74,7 +74,7 @@ jest.mock('mongoose', () => {
                 };
             }
             
-            // Add static methods
+            // Static methods
             Model.findOne = jest.fn();
             Model.findById = jest.fn();
             Model.getStatusHistory = jest.fn();
@@ -97,7 +97,7 @@ jest.mock('mongoose', () => {
         }
     };
 
-    // Add isValidObjectId helper
+    // ObjectId validation helper
     mockMongoose.isValidObjectId = jest.fn().mockImplementation(
         (id) => /^[0-9a-fA-F]{24}$/.test(id) || id === 'mock-object-id'
     );
@@ -105,10 +105,10 @@ jest.mock('mongoose', () => {
     return mockMongoose;
 });
 
-// Mock amqplib to prevent actual RabbitMQ connections
+// Mock RabbitMQ library
 jest.mock('amqplib', () => require('./__mocks__/amqplib'));
 
-// Mock the messageQueue
+// Mock message queue service
 jest.mock('../src/messageQueue', () => ({
     publishStatusCreated: jest.fn().mockResolvedValue(true),
     publishStatusUpdated: jest.fn().mockResolvedValue(true),
@@ -118,15 +118,15 @@ jest.mock('../src/messageQueue', () => ({
     close: jest.fn().mockResolvedValue(true)
 }));
 
-// Global test environment setup
+// Test environment configuration
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test-jwt-secret';
 process.env.SERVICE_API_KEY = 'test-service-api-key';
 
-// Increase timeout for tests
+// Extended timeout for async operations
 jest.setTimeout(30000);
 
-// Console error/warning mock to keep test output clean
+// Suppress console output during tests
 global.console = {
     ...console,
     error: jest.fn(),
@@ -136,7 +136,7 @@ global.console = {
     log: jest.fn()
 }; 
 
-// Setup global afterAll to ensure all mocks are cleaned up
+// Global test cleanup
 afterAll(() => {
     jest.restoreAllMocks();
 }); 

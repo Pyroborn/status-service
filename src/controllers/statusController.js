@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const { isValidObjectId } = mongoose;
 const messageQueue = require('../messageQueue');
 
-// Create a new status
+// Status creation endpoint
 exports.createStatus = async (req, res) => {
     try {
         const { ticketId, currentStatus, updatedBy } = req.body;
@@ -56,7 +56,7 @@ exports.createStatus = async (req, res) => {
     }
 };
 
-// Get status for a ticket
+// Retrieve status by ticket ID
 exports.getStatus = async (req, res) => {
     try {
         const { ticketId } = req.params;
@@ -77,7 +77,7 @@ exports.getStatus = async (req, res) => {
     }
 };
 
-// Get status history for a ticket
+// Retrieve status history with optional filters
 exports.getStatusHistory = async (req, res) => {
     try {
         const { ticketId } = req.params;
@@ -108,7 +108,7 @@ exports.getStatusHistory = async (req, res) => {
     }
 };
 
-// Update status manually
+// Status update endpoint
 exports.updateStatus = async (req, res) => {
     try {
         const { ticketId } = req.params;
@@ -195,7 +195,7 @@ exports.updateStatus = async (req, res) => {
     }
 };
 
-// Get latest status for multiple tickets
+// Batch status retrieval
 exports.getBatchStatus = async (req, res) => {
     try {
         const { ticketIds } = req.body;
@@ -223,7 +223,7 @@ exports.getBatchStatus = async (req, res) => {
     }
 };
 
-// Get real-time status updates since a timestamp
+// Real-time status updates endpoint
 exports.getStatusUpdates = async (req, res) => {
     try {
         const { since } = req.query;

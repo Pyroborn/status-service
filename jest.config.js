@@ -20,7 +20,7 @@ module.exports = {
     silent: true,
     // Allow real tear down of resources
     forceExit: true,
-    // Ignore broken tests for now
+    // Ignore broken tests
     testPathIgnorePatterns: [
         '/node_modules/',
         'statusController.test.js',
