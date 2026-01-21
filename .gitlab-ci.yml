@@ -1,0 +1,6 @@
+stages:
+- test
+ping:
+    stage: test
+    script:
+        - echo "Gitlab CI works"
