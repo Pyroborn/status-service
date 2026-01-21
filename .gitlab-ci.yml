@@ -4,3 +4,4 @@ ping:
     stage: test
     script:
         - echo "Gitlab CI works"
+        - echo "really works"
